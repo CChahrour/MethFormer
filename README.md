@@ -51,7 +51,7 @@ Options can be customized inside the script or modified for sweep tuning. This w
 
 ---
 
-## 🔍 Metrics
+## 📊 Metrics
 
 * `masked_mse`: Mean squared error over unmasked positions
 * `masked_mae`: Mean absolute error
@@ -69,7 +69,7 @@ See `scripts/finetune_mll.py` for an example.
 
 ---
 
-## 📊 Visualizations & Interpretability
+## 🔍 Visualizations & Interpretability
 
 You can run [Captum](https://captum.ai) or SHAP for:
 
