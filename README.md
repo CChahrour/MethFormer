@@ -16,7 +16,16 @@
 ## 📁 Project Structure
 
 ```
-...
+.
+├── config/                       # config
+├── data/                         # Binned methylation datasets (HuggingFace format)
+├── output/                       # Pretrained models, logs, and checkpoints
+├── scripts/                      
+│   ├── methformer.py             # Model classes, data collator, 
+│   ├── pretrain_methformer.py    # Main training script
+│   └── finetune_mll.py           # (optional) downstream fine-tuning
+├── requirements.txt
+└── README.md
 ```
 
 ---

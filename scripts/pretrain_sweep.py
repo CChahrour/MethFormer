@@ -116,7 +116,7 @@ def train():
     model.config.save_pretrained(os.path.join(out_dir, "model"))
 
 
-with open("pretrain_sweep_config.json", "r") as f:
+with open("config/pretrain_sweep_config.json", "r") as f:
     sweep_config = json.load(f)
 
 sweep_id = wandb.sweep(
