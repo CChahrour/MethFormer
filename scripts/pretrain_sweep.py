@@ -39,7 +39,7 @@ device = (
     else "cpu"
 )
 
-dataset = load_from_disk("data/methformer_pretrain_binned")
+dataset = load_from_disk("/home/ubuntu/project/MethFormer/data/methformer_pretrain_binned")
 train_dataset = dataset["train"].shuffle(seed=42)
 eval_dataset = dataset["validation"]
 
@@ -49,13 +49,13 @@ def train():
         group="methformer_pretrain_sweep",
         job_type="pretrain_sweep",
         name=f"mf_{datetime.datetime.now().strftime('%Y-%m-%d_%H%M')}",
-        dir="output/methformer_pretrain_sweep",
+        dir="/home/ubuntu/project/MethFormer/output/methformer_pretrain_sweep",
         reinit="finish_previous",
     )
     config = wandb.config
 
     run_name = f"mf_{datetime.datetime.now().strftime('%Y-%m-%d_%H%M')}"
-    out_dir = f"output/methformer_pretrain_sweep/{run_name}"
+    out_dir = f"/home/ubuntu/project/MethFormer/output/methformer_pretrain_sweep/{run_name}"
     os.makedirs(out_dir, exist_ok=True)
 
     model_config = PretrainedConfig(
@@ -116,7 +116,7 @@ def train():
     model.config.save_pretrained(os.path.join(out_dir, "model"))
 
 
-with open("config/pretrain_sweep_config.json", "r") as f:
+with open("/home/ubuntu/project/MethFormer/config/pretrain_sweep_config.json", "r") as f:
     sweep_config = json.load(f)
 
 sweep_id = wandb.sweep(
@@ -142,7 +142,7 @@ best_run = max(runs, key=lambda r: r.summary["masked_r2"])
 
 # Save best config
 best_config = {k: v for k, v in best_run.config.items() if not k.startswith("_")}
-with open("best_config.json", "w") as f:
+with open("/home/ubuntu/project/MethFormer/config/best_config.json", "w") as f:
     json.dump(best_config, f, indent=2)
 
 print(f"Best run ID: {best_run.id}")

@@ -20,7 +20,7 @@ from methformer import (
 run_name = f"mf_{datetime.datetime.now().strftime('%Y-%m-%d_%H%M')}"
 print(f"Run name: {run_name}")
 
-out_dir = "output/methformer_pretrained/"
+out_dir = "/home/ubuntu/project/MethFormer/output/methformer_pretrained/"
 os.makedirs(out_dir, exist_ok=True)
 
 
@@ -32,7 +32,7 @@ device = (
     else "cpu"
 )
 
-dataset = load_from_disk("data/methformer_pretrain_binned")
+dataset = load_from_disk("/home/ubuntu/project/MethFormer/data/methformer_pretrain_binned")
 train_dataset = dataset["train"].shuffle(seed=42)
 eval_dataset = dataset["validation"]
 
