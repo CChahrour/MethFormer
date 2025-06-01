@@ -1,0 +1,17 @@
+{
+  "name": "methformer_pretrain_sweep",
+  "method": "bayes",
+  "metric": {"name": "eval/masked_mse", "goal": "minimize"},
+  "early_terminate": {
+    "type": "hyperband",
+    "min_iter": 4,
+    "eta": 2
+  },
+  "parameters": {
+    "masking_ratio": {"values": [0.1, 0.15, 0.2]},
+    "hidden_dim": {"values": [64, 128, 256]},
+    "num_hidden_layers": {"values": [6, 8, 12]},
+    "num_attention_heads": {"values": [4, 8]},
+    "hidden_dropout_prob": {"values": [0.1, 0.2, 0.3]}
+  }
+}
