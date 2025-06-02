@@ -4,7 +4,6 @@ import os
 import torch
 import wandb
 from datasets import load_from_disk
-from sklearn.metrics import mean_absolute_error, mean_squared_error
 from transformers import (
     EarlyStoppingCallback,
     PretrainedConfig,
@@ -52,7 +51,7 @@ model.to(device)
 training_args = TrainingArguments(
     run_name=run_name,
     output_dir=os.path.join(out_dir, "checkpoints"),
-    eval_on_start=True,
+    eval_on_start=False,
     per_device_train_batch_size=128,
     per_device_eval_batch_size=256,
     gradient_accumulation_steps=1,
@@ -65,7 +64,7 @@ training_args = TrainingArguments(
     save_strategy="steps",
     save_total_limit=1,
     eval_strategy="steps",
-    logging_steps=1000,
+    logging_steps=500,
     eval_steps=1000,
     save_steps=5000,
     metric_for_best_model="masked_mse",
@@ -80,18 +79,21 @@ training_args = TrainingArguments(
 )
 
 
+
 def compute_metrics(eval_preds):
     logits, labels = eval_preds
     logits = torch.tensor(logits)
     labels = torch.tensor(labels)
+
+    # Only evaluate masked positions (label == -1.0 was masked during input)
     mask = labels != -1.0
-    masked_logits = logits[mask].cpu.numpy()
-    masked_labels = labels[mask].cpu.numpy()
-    mse = mean_squared_error(masked_labels, masked_logits)
-    mae = mean_absolute_error(masked_labels, masked_logits)
+
+    masked_mse = torch.mean((logits[mask] - labels[mask]) ** 2).item()
+    masked_mae = torch.mean(torch.abs(logits[mask] - labels[mask])).item()
+
     return {
-        "masked_mse": mse,
-        "masked_mae": mae,
+        "masked_mse": masked_mse,
+        "masked_mae": masked_mae,
     }
 
 
@@ -108,7 +110,8 @@ trainer = Trainer(
 print("Starting training...")
 
 wandb.init(
-    group="methformer_pretrain",
+    project="MethFormer",
+    group="pretrain_methformer",
     job_type="pretrain_full",
     name=run_name,
     dir=out_dir,
