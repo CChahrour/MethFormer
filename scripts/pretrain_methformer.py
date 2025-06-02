@@ -40,7 +40,7 @@ logger.info(f"Using device: {device}")
 # ─────────────────────────────────────────────────────────────
 # Dataset Loading
 # ─────────────────────────────────────────────────────────────
-dataset_path = "/home/ubuntu/project/MethFormer/data/methformer_pretrain_binned"
+dataset_path = "/home/ubuntu/project/MethFormer/data/methformer_pretrain_dataset"
 logger.info(f"Loading dataset from {dataset_path}")
 dataset = load_from_disk(dataset_path)
 train_dataset = dataset["train"].shuffle(seed=42)
@@ -57,6 +57,7 @@ config = PretrainedConfig(
     num_hidden_layers=12,
     num_attention_heads=8,
     hidden_dropout_prob=0.1,
+    max_position_embeddings=1024,
 )
 
 model = Methformer(config, mode="pretrain", use_cls_token=False).to(device)
@@ -80,7 +81,7 @@ training_args = TrainingArguments(
     logging_dir=os.path.join(output_root, "logs"),
     save_strategy="steps",
     save_total_limit=1,
-    evaluation_strategy="steps",
+    eval_strategy="steps",
     logging_steps=500,
     eval_steps=1000,
     save_steps=5000,

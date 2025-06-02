@@ -1,3 +1,4 @@
+import argparse
 import os
 
 import anndata as ad
@@ -12,10 +13,38 @@ from loguru import logger
 
 from methformer import MethformerDataset
 
-# setup logging
-logger.remove()
-logger.add("logs/methformer_data.log", format="{time} {level} {message}", level="INFO")
-
+args = argparse.ArgumentParser(description="Prepare Methformer pretraining data")
+args.add_argument(
+    "--regions_bed",
+    type=str,
+    default="/home/ubuntu/project/data/reference/methylome_1024bp.bed",
+    help="Path to the regions BED file",
+)
+args.add_argument(
+    "--zarr_path",
+    type=str,
+    default="data/meth_evoc.targeted.GRCh38Decoy.markdup.CG.zarrz",
+    help="Path to the Zarr dataset containing methylation data",
+)
+args.add_argument(
+    "--tile_size",
+    type=int,
+    default=32,
+    help="Size of the tiles to split the regions into (default: 32)",
+)
+args.add_argument(
+    "--bigwigs_folder",
+    type=str,
+    default="data/mll_bw",
+    help="Folder containing bigwig files for labels extraction",
+)
+args.add_argument(
+    "--chromsizes_file",
+    type=str,
+    default="/home/ubuntu/project/data/reference/hg38.chrom.sizes",
+    help="Path to the chromosome sizes file",
+)
+args = args.parse_args()
 
 # setup logging
 logger.remove()
@@ -138,7 +167,7 @@ def build_tensor(df, n_bins=32):
 
 
 @logger.catch
-def get_labels(region_file, bigwigs_folder, sample_columns):
+def get_labels(region_file, bigwigs_folder, sample_columns, chromsizes_file):
     """
     Imports bigwig files from the specified folder and regions file,
     and returns a DataFrame with the mean values for each sample.
@@ -149,7 +178,7 @@ def get_labels(region_file, bigwigs_folder, sample_columns):
         bigwigs_folder=bigwigs_folder,
         regions_file=region_file,
         target="mean",
-        chromsizes_file="/home/ubuntu/project/data/reference/hg38.chrom.sizes",
+        chromsizes_file=chromsizes_file,
     )
     mll_df = mll_adata.T.to_df()
     colname_dict = {
@@ -242,23 +271,20 @@ def main():
     and saved as a Hugging Face dataset.
     """
     logger.info("Starting Methformer pretraining data preparation...")
-    regions = pr.read_bed(
-        "/home/ubuntu/project/data/reference/methylome_1024bp.bed", as_df=True
-    )
+    os.makedirs("data", exist_ok=True)
+    regions = pr.read_bed(args.regions_bed, as_df=True)
     binned = tile_regions(regions)
     meth_df_file = "data/meth_panel_binned.parquet"
     if os.path.exists(meth_df_file):
         meth_df = pd.read_parquet(meth_df_file)
     else:
-        meth_df = prepare_methylation_tensor(
-            binned, "data/meth_evoc.targeted.GRCh38Decoy.markdup.CG.zarrz"
-        )
+        meth_df = prepare_methylation_tensor(binned, args.zarr_path, args.tile_size)
 
     meth_tensor, sample_ids, _, valid_regions = build_tensor(meth_df)
 
     mll_df = get_labels(
-        "/home/ubuntu/project/data/reference/methylome_1024bp.bed",
-        "data/mll_bw",
+        args.regions_bed,
+        args.bigwigs_folder,
         sample_ids,
     )
     adata = make_anndata(meth_df, valid_regions, mll_df, meth_tensor)

@@ -13,7 +13,7 @@ from transformers import (
 )
 
 from methformer import (
-    MethformerForRegression,
+    Methformer,
     MethformerCollator,
 )
 
@@ -23,7 +23,9 @@ from methformer import (
 logger.remove()
 os.makedirs("logs", exist_ok=True)
 log_file = f"logs/finetune_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-logger.add(log_file, level="INFO", format="{time:YYYY-MM-DD at HH:mm:ss} | {level} | {message}")
+logger.add(
+    log_file, level="INFO", format="{time:YYYY-MM-DD at HH:mm:ss} | {level} | {message}"
+)
 logger.info("Starting Methformer fine-tuning...")
 
 # ─────────────────────────────────────────────────────────────
@@ -34,8 +36,10 @@ output_root = "/home/ubuntu/project/MethFormer/output/methformer_finetuned/"
 os.makedirs(output_root, exist_ok=True)
 
 device = (
-    "cuda" if torch.cuda.is_available()
-    else "mps" if torch.backends.mps.is_available()
+    "cuda"
+    if torch.cuda.is_available()
+    else "mps"
+    if torch.backends.mps.is_available()
     else "cpu"
 )
 logger.info(f"Using device: {device}")
@@ -60,10 +64,11 @@ config = PretrainedConfig(
     num_hidden_layers=12,
     num_attention_heads=8,
     hidden_dropout_prob=0.1,
+    max_position_embeddings=1024,
 )
 
-# Load a Methformer model with a regression head
-model = MethformerForRegression(config).to(device)
+# Load Methformer model with regression head
+model = Methformer(config, task="regression", use_cls_token=True).to(device)
 logger.info("Regression model instantiated.")
 
 # ─────────────────────────────────────────────────────────────
@@ -99,6 +104,7 @@ training_args = TrainingArguments(
     seed=42,
 )
 
+
 # ─────────────────────────────────────────────────────────────
 # Metrics
 # ─────────────────────────────────────────────────────────────
@@ -109,13 +115,16 @@ def compute_metrics(eval_preds):
 
     mse = torch.mean((logits - labels) ** 2).item()
     mae = torch.mean(torch.abs(logits - labels)).item()
-    r2 = 1 - torch.sum((logits - labels) ** 2) / torch.sum((labels - labels.mean()) ** 2)
+    r2 = 1 - torch.sum((logits - labels) ** 2) / torch.sum(
+        (labels - labels.mean()) ** 2
+    )
 
     return {
         "mse": mse,
         "mae": mae,
         "r2": r2.item(),
     }
+
 
 # ─────────────────────────────────────────────────────────────
 # Trainer Setup
