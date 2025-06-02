@@ -250,7 +250,8 @@ def main():
             binned, "data/meth_evoc.targeted.GRCh38Decoy.markdup.CG.zarrz"
         )
 
-    meth_tensor, sample_ids, valid_regions = build_tensor(meth_df)
+    meth_tensor, sample_ids, _, valid_regions = build_tensor(meth_df)
+
     mll_df = get_labels(
         "/home/ubuntu/project/data/reference/methylome_1024bp.bed",
         "data/mll_bw",

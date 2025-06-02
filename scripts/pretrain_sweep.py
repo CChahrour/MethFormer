@@ -31,6 +31,7 @@ def compute_metrics(eval_preds):
         "masked_mae": masked_mae,
     }
 
+
 device = (
     "cuda"
     if torch.cuda.is_available()
@@ -39,7 +40,9 @@ device = (
     else "cpu"
 )
 
-dataset = load_from_disk("/home/ubuntu/project/MethFormer/data/methformer_pretrain_binned")
+dataset = load_from_disk(
+    "/home/ubuntu/project/MethFormer/data/methformer_pretrain_binned"
+)
 train_dataset = dataset["train"].shuffle(seed=42)
 eval_dataset = dataset["validation"]
 
@@ -55,7 +58,9 @@ def train():
     config = wandb.config
 
     run_name = f"mf_{datetime.datetime.now().strftime('%Y-%m-%d_%H%M')}"
-    out_dir = f"/home/ubuntu/project/MethFormer/output/methformer_pretrain_sweep/{run_name}"
+    out_dir = (
+        f"/home/ubuntu/project/MethFormer/output/methformer_pretrain_sweep/{run_name}"
+    )
     os.makedirs(out_dir, exist_ok=True)
 
     model_config = PretrainedConfig(
@@ -66,7 +71,7 @@ def train():
         hidden_dropout_prob=config.hidden_dropout_prob,
     )
 
-    model = Methformer(model_config)
+    model = Methformer(model_config, mode="pretrain", use_cls_token=False)
     model.to(device)
 
     training_args = TrainingArguments(
@@ -116,7 +121,9 @@ def train():
     model.config.save_pretrained(os.path.join(out_dir, "model"))
 
 
-with open("/home/ubuntu/project/MethFormer/config/pretrain_sweep_config.json", "r") as f:
+with open(
+    "/home/ubuntu/project/MethFormer/config/pretrain_sweep_config.json", "r"
+) as f:
     sweep_config = json.load(f)
 
 sweep_id = wandb.sweep(
@@ -132,13 +139,13 @@ api = wandb.Api()
 sweep_path = f"{wandb.run.entity}/{wandb.run.project}/{sweep_id}"
 sweep = api.sweep(sweep_path)
 
-# Filter only finished runs with masked_r2
+# Filter only finished runs with masked_mse in summary
 runs = [
-    run for run in sweep.runs if run.state == "finished" and "masked_r2" in run.summary
+    run for run in sweep.runs if run.state == "finished" and "masked_mse" in run.summary
 ]
 
-# Find best run by highest masked_r2
-best_run = max(runs, key=lambda r: r.summary["masked_r2"])
+# Find best run by lowest masked_mse
+best_run = min(runs, key=lambda r: r.summary["masked_mse"])
 
 # Save best config
 best_config = {k: v for k, v in best_run.config.items() if not k.startswith("_")}
@@ -146,4 +153,4 @@ with open("/home/ubuntu/project/MethFormer/config/best_config.json", "w") as f:
     json.dump(best_config, f, indent=2)
 
 print(f"Best run ID: {best_run.id}")
-print(f"Best masked_r2: {best_run.summary['masked_r2']}")
+print(f"Best masked_mse: {best_run.summary['masked_mse']}")
