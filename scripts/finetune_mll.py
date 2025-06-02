@@ -25,7 +25,7 @@ import wandb
 # ─────────────────────────────────────────────────────────────
 logger.remove()
 os.makedirs("logs", exist_ok=True)
-log_file = f"logs/finetune_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+log_file = "logs/finetune_mll.log"
 logger.add(
     log_file, level="INFO", format="{time:YYYY-MM-DD at HH:mm:ss} | {level} | {message}"
 )
@@ -50,7 +50,7 @@ logger.info(f"Using device: {device}")
 # ─────────────────────────────────────────────────────────────
 # Dataset Loading
 # ─────────────────────────────────────────────────────────────
-dataset_path = "/home/ubuntu/project/MethFormer/data/methformer_pretrain_binned"
+dataset_path = "/home/ubuntu/project/MethFormer/data/methformer_dataset"
 logger.info(f"Loading dataset from {dataset_path}")
 dataset = load_from_disk(dataset_path)
 train_dataset = dataset["train"]
@@ -65,11 +65,10 @@ data_collator = MethformerCollator()
 # Load Methformer model with regression head
 model_pretrained_path = "/home/ubuntu/project/MethFormer/output/methformer_pretrained/model"
 model = Methformer.from_pretrained_encoder(
-    model_pretrained_path
-).to(device)
-model.task = "regression"
-model.use_cls_token = True
-
+    path=model_pretrained_path,
+    mode="regression",
+    use_cls_token=False
+)
 logger.info("Regression model instantiated.")
 
 # ─────────────────────────────────────────────────────────────
@@ -90,7 +89,7 @@ training_args = TrainingArguments(
     logging_dir=os.path.join(output_root, "logs"),
     save_strategy="steps",
     save_total_limit=2,
-    evaluation_strategy="steps",
+    eval_strategy="steps",
     logging_steps=200,
     eval_steps=500,
     save_steps=1000,
@@ -109,8 +108,6 @@ training_args = TrainingArguments(
 # ─────────────────────────────────────────────────────────────
 # Metrics
 # ─────────────────────────────────────────────────────────────
-
-
 def compute_metrics(eval_preds):
     logits, labels = eval_preds
     logits = torch.tensor(logits)

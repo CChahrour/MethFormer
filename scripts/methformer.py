@@ -5,9 +5,10 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from safetensors.torch import load_file
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from torch.utils.data import Dataset
-from transformers import PreTrainedModel, PretrainedConfig
+from transformers import PretrainedConfig, PreTrainedModel
 from transformers.modeling_outputs import ModelOutput, SequenceClassifierOutput
 
 
@@ -48,7 +49,7 @@ class MethformerDataset(Dataset):
             assert labels is not None
             assert inputs.shape[0] == labels.shape[0]
             self.inputs = torch.tensor(inputs, dtype=torch.float32)
-            self.labels = torch.tensor(labels, dtype=torch.float32)
+            self.labels = torch.tensor(labels, dtype=torch.float32).view(-1)
 
     def __len__(self):
         if self.mode == "pretrain":
@@ -93,6 +94,7 @@ class MethformerCollator:
     - Pretrain: returns masked inputs and original labels
     - Regression: returns full input and scalar label
     """
+
     def __init__(self, mode="pretrain"):
         assert mode in {"pretrain", "regression"}
         self.mode = mode
@@ -149,6 +151,10 @@ class Methformer(PreTrainedModel):
         self.use_cls_token = use_cls_token
 
         self.input_proj = nn.Linear(config.input_dim, config.hidden_dim)
+        print("input_proj shape:", self.input_proj.weight.shape)
+        print("input_proj bias shape:", self.input_proj.bias.shape)
+        print("input_dim:", config.input_dim)
+
         self.pos_embed = nn.Parameter(
             torch.randn(
                 1,
@@ -175,7 +181,7 @@ class Methformer(PreTrainedModel):
 
     def forward(self, input_values, attention_mask, labels=None):
         B, L, _ = input_values.shape
-
+        
         x = self.input_proj(input_values)  # (B, L, D)
 
         if self.use_cls_token:
@@ -209,7 +215,7 @@ class Methformer(PreTrainedModel):
 
         elif self.mode == "regression":
             if self.use_cls_token:
-                pooled = x[:, 0]  # CLS token
+                pooled = x[:, 0]
             else:
                 pooled = (x * attention_mask.unsqueeze(-1)).sum(1) / attention_mask.sum(
                     1, keepdim=True
@@ -226,11 +232,17 @@ class Methformer(PreTrainedModel):
         self.mode = mode
 
     @classmethod
-    def from_pretrained_encoder(cls, path, task="pretrain", use_cls_token=False):
+    def from_pretrained_encoder(cls, path, mode="pretrain", use_cls_token=False):
         config = PretrainedConfig.from_pretrained(path)
-        model = cls(config, task=task, use_cls_token=use_cls_token)
-        pretrained = cls(config)
-        pretrained.load_state_dict(torch.load(os.path.join(path, "pytorch_model.bin")), strict=False)
+        model = cls(config, mode=mode, use_cls_token=use_cls_token)
+
+        # Load encoder weights from safetensors
+        state_dict = load_file(os.path.join(path, "model.safetensors"))
+
+        # Init a temporary model to extract encoder weights
+        pretrained = cls(config, mode="pretrain", use_cls_token=use_cls_token)
+        pretrained.load_state_dict(state_dict, strict=False)
+
         model.encoder.load_state_dict(pretrained.encoder.state_dict())
         return model
 

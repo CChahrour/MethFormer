@@ -48,7 +48,7 @@ args = args.parse_args()
 
 # setup logging
 logger.remove()
-logger.add("logs/methformer_data.log", format="{time} {level} {message}", level="INFO")
+logger.add("logs/data.log", format="{time} {level} {message}", level="INFO")
 
 
 @logger.catch
@@ -216,10 +216,10 @@ def make_anndata(meth_df, valid_regions_list, mll_df, meth_tensor):
     region_meta = region_meta.loc[valid_regions_list]
     mll_df_filtered = mll_df.loc[valid_regions_list]
     mll_df_filtered = mll_df_filtered.T
-    logger.debug("MLL shape:", mll_df_filtered.shape)
-    logger.debug("Region meta shape:", region_meta.shape)
-    logger.debug("Obs meta shape:", obs_meta.shape)
-    logger.debug("Meth tensor shape:", meth_tensor.shape)
+    logger.info("MLL shape:", mll_df_filtered.shape)
+    logger.info("Region meta shape:", region_meta.shape)
+    logger.info("Obs meta shape:", obs_meta.shape)
+    logger.info("Meth tensor shape:", meth_tensor.shape)
     adata = ad.AnnData(X=mll_df_filtered.values, obs=obs_meta, var=region_meta)
     adata.obsm["methylation"] = meth_tensor
     adata.write("data/methformer_pretrain_MLL.h5ad")
@@ -227,33 +227,35 @@ def make_anndata(meth_df, valid_regions_list, mll_df, meth_tensor):
 
 
 @logger.catch
-def convert_dataset(adata, mask):
-    """
-    Converts the AnnData object to a MethformerDataset.
-    The dataset is filtered based on the provided mask,
-    which selects specific regions based on the contig.
-    The methylation tensor is reshaped to match the expected input shape for Methformer.
-    """
-    logger.info("Converting AnnData to MethformerDataset...")
-    tensor = adata.obsm["methylation"][:, mask.values, :, :]
-    return MethformerDataset(tensor.reshape(-1, 32, 2))
+def convert_dataset(adata, mask, mode="pretrain"):
+    logger.info(f"Converting AnnData to MethformerDataset (mode={mode})...")
+    tensor = adata.obsm["methylation"][:, mask.values, :, :]  # (N, R, 2, 32)
+
+    # Reshape to (N, R, C)
+    tensor = tensor.transpose(0, 2, 3, 1).reshape(tensor.shape[0], -1, 2)
+
+    if mode == "regression":
+        labels = adata.X[:, mask.values].mean(axis=1)  # (N,)
+        return MethformerDataset(tensor, labels=labels, mode="regression")
+    else:
+        return MethformerDataset(tensor, mode="pretrain")
 
 
 @logger.catch
 def to_numpy(torch_dataset):
     """
     Converts a PyTorch dataset to a NumPy dictionary.
-    This function iterates over the dataset using a DataLoader,
-    collects the inputs, labels, and attention masks,
-    and concatenates them into NumPy arrays.
     """
     logger.info("Converting PyTorch dataset to NumPy arrays...")
     loader = DataLoader(torch_dataset, batch_size=1024, num_workers=8)
+
     inputs, labels, masks = [], [], []
     for batch in tqdm(loader, desc="Batching"):
-        inputs.append(batch["inputs"].numpy())
+        key = "inputs" if "inputs" in batch else "input_values"
+        inputs.append(batch[key].numpy())
         labels.append(batch["labels"].numpy())
         masks.append(batch["attention_mask"].numpy())
+
     return {
         "inputs": np.concatenate(inputs),
         "labels": np.concatenate(labels),
@@ -272,32 +274,34 @@ def main():
     """
     logger.info("Starting Methformer pretraining data preparation...")
     os.makedirs("data", exist_ok=True)
-    regions = pr.read_bed(args.regions_bed, as_df=True)
-    binned = tile_regions(regions)
+  
     meth_df_file = "data/meth_panel_binned.parquet"
     if os.path.exists(meth_df_file):
         meth_df = pd.read_parquet(meth_df_file)
     else:
+        regions = pr.read_bed(args.regions_bed, as_df=True)
+        binned = tile_regions(regions)
         meth_df = prepare_methylation_tensor(binned, args.zarr_path, args.tile_size)
 
     meth_tensor, sample_ids, _, valid_regions = build_tensor(meth_df)
 
     mll_df = get_labels(
-        args.regions_bed,
-        args.bigwigs_folder,
-        sample_ids,
+        region_file=args.regions_bed,
+        bigwigs_folder=args.bigwigs_folder,
+        sample_columns=sample_ids,
+        chromsizes_file=args.chromsizes_file,
     )
-    adata = make_anndata(meth_df, valid_regions, mll_df, meth_tensor)
 
+    adata = make_anndata(meth_df, valid_regions, mll_df, meth_tensor)
     adata.write("data/methformer_pretrain_binned.h5ad")
 
     train_mask = ~(adata.var["contig"].isin(["chr8", "chr9"]))
     eval_mask = adata.var["contig"] == "chr8"
     test_mask = adata.var["contig"] == "chr9"
 
-    train_set = convert_dataset(adata, train_mask)
-    eval_set = convert_dataset(adata, eval_mask)
-    test_set = convert_dataset(adata, test_mask)
+    train_set = convert_dataset(adata, train_mask, mode="regression")
+    eval_set = convert_dataset(adata, eval_mask, mode="regression")
+    test_set = convert_dataset(adata, test_mask, mode="regression")
 
     hf_dset = DatasetDict(
         {
@@ -307,7 +311,7 @@ def main():
         }
     )
 
-    hf_dset.save_to_disk("data/methformer_pretrain_dataset")
+    hf_dset.save_to_disk("data/methformer_dataset")
     logger.info("✅ Pretraining data ready for Methformer!")
 
 
