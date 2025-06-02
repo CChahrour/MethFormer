@@ -17,6 +17,11 @@ logger.remove()
 logger.add("logs/methformer_data.log", format="{time} {level} {message}", level="INFO")
 
 
+# setup logging
+logger.remove()
+logger.add("logs/methformer_data.log", format="{time} {level} {message}", level="INFO")
+
+
 @logger.catch
 def tile_regions(regions_df, tile_size=32):
     """
@@ -164,32 +169,31 @@ def get_labels(region_file, bigwigs_folder, sample_columns):
 
 
 @logger.catch
-def make_anndata(mll_df, meth_tensor, sample_ids, region_df, full_df):
+def make_anndata(meth_df, valid_regions_list, mll_df, meth_tensor):
     """
-    Creates an AnnData object from the methylation tensor and metadata.
-    The AnnData object contains the methylation tensor in the `obsm` attribute,
-    and the metadata for observations and variables.
-    The observations metadata includes sample IDs and other relevant information,
-    while the variables metadata includes region names, contigs, and start positions.
+    Creates an AnnData object from the methylation tensor and labels.
+    The AnnData object contains the methylation tensor in the obsm field
+    and the labels in the var field.
     """
+
     logger.info("Creating AnnData object...")
     obs_meta = pd.read_csv("data/meth_metadata.csv")
     obs_meta = obs_meta[~obs_meta["sample_id"].str.contains("xeno")]
     obs_meta["sample_id"] = "METH-" + obs_meta["sample_id"]
     obs_meta = obs_meta.set_index("sample_id")
-    region_meta = full_df.drop_duplicates("RegionName")[
+    region_meta = meth_df.drop_duplicates("RegionName")[
         ["RegionName", "contig", "start"]
     ].set_index("RegionName")
-    region_meta = region_meta.loc[region_df]
-
-    # Align MLL matrix with valid methylation regions
-    valid_region_names = region_df.index.intersection(mll_df.index)
-    mll_df_filtered = mll_df.loc[valid_region_names]
-    region_meta = region_meta.loc[valid_region_names]
-    assert mll_df_filtered.shape[0] == region_meta.shape[0], "Mismatch after filtering"
-
+    region_meta = region_meta.loc[valid_regions_list]
+    mll_df_filtered = mll_df.loc[valid_regions_list]
+    mll_df_filtered = mll_df_filtered.T
+    logger.debug("MLL shape:", mll_df_filtered.shape)
+    logger.debug("Region meta shape:", region_meta.shape)
+    logger.debug("Obs meta shape:", obs_meta.shape)
+    logger.debug("Meth tensor shape:", meth_tensor.shape)
     adata = ad.AnnData(X=mll_df_filtered.values, obs=obs_meta, var=region_meta)
     adata.obsm["methylation"] = meth_tensor
+    adata.write("data/methformer_pretrain_MLL.h5ad")
     return adata
 
 
@@ -257,7 +261,7 @@ def main():
         "data/mll_bw",
         sample_ids,
     )
-    adata = make_anndata(mll_df, meth_tensor, sample_ids, valid_regions, meth_df)
+    adata = make_anndata(meth_df, valid_regions, mll_df, meth_tensor)
 
     adata.write("data/methformer_pretrain_binned.h5ad")
 
