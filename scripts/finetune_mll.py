@@ -1,21 +1,24 @@
-import os
 import datetime
+import os
 
+import matplotlib.pyplot as plt
+import pandas as pd
+import seaborn as sns
 import torch
-import wandb
-from loguru import logger
 from datasets import load_from_disk
-from transformers import (
-    EarlyStoppingCallback,
-    PretrainedConfig,
-    Trainer,
-    TrainingArguments,
-)
-
+from loguru import logger
 from methformer import (
     Methformer,
     MethformerCollator,
 )
+from scipy.stats import pearsonr, spearmanr
+from transformers import (
+    EarlyStoppingCallback,
+    Trainer,
+    TrainingArguments,
+)
+
+import wandb
 
 # ─────────────────────────────────────────────────────────────
 # Logging Setup
@@ -52,23 +55,21 @@ logger.info(f"Loading dataset from {dataset_path}")
 dataset = load_from_disk(dataset_path)
 train_dataset = dataset["train"]
 eval_dataset = dataset["validation"]
+test_dataset = dataset["test"]
 
 data_collator = MethformerCollator()
 
 # ─────────────────────────────────────────────────────────────
 # Model Configuration
 # ─────────────────────────────────────────────────────────────
-config = PretrainedConfig(
-    input_dim=2,
-    hidden_dim=128,
-    num_hidden_layers=12,
-    num_attention_heads=8,
-    hidden_dropout_prob=0.1,
-    max_position_embeddings=1024,
-)
-
 # Load Methformer model with regression head
-model = Methformer(config, task="regression", use_cls_token=True).to(device)
+model_pretrained_path = "/home/ubuntu/project/MethFormer/output/methformer_pretrained/model"
+model = Methformer.from_pretrained_encoder(
+    model_pretrained_path
+).to(device)
+model.task = "regression"
+model.use_cls_token = True
+
 logger.info("Regression model instantiated.")
 
 # ─────────────────────────────────────────────────────────────
@@ -108,21 +109,34 @@ training_args = TrainingArguments(
 # ─────────────────────────────────────────────────────────────
 # Metrics
 # ─────────────────────────────────────────────────────────────
+
+
 def compute_metrics(eval_preds):
     logits, labels = eval_preds
     logits = torch.tensor(logits)
     labels = torch.tensor(labels)
-
+    # Do NOT mask here — all labels are known
     mse = torch.mean((logits - labels) ** 2).item()
     mae = torch.mean(torch.abs(logits - labels)).item()
+    rmse = torch.sqrt(torch.mean((logits - labels) ** 2)).item()
+    # R²
     r2 = 1 - torch.sum((logits - labels) ** 2) / torch.sum(
         (labels - labels.mean()) ** 2
     )
+    r2 = r2.item()
+    # Correlations
+    logits_np = logits.detach().cpu().numpy()
+    labels_np = labels.detach().cpu().numpy()
+    pearson_corr, _ = pearsonr(logits_np, labels_np)
+    spearman_corr, _ = spearmanr(logits_np, labels_np)
 
     return {
         "mse": mse,
         "mae": mae,
-        "r2": r2.item(),
+        "rmse": rmse,
+        "r2": r2,
+        "pearson": pearson_corr,
+        "spearman": spearman_corr,
     }
 
 
@@ -150,7 +164,6 @@ wandb.init(
     name=run_name,
     dir=output_root,
     reinit="finish_previous",
-    config=config.to_dict(),
 )
 
 # ─────────────────────────────────────────────────────────────
@@ -169,4 +182,67 @@ trainer.save_model(save_path)
 model.config.save_pretrained(save_path)
 logger.info(f"✅ Fine-tuned model saved to {save_path}")
 
+# ─────────────────────────────────────────────────────────────
+# Predict on Test Set
+# ─────────────────────────────────────────────────────────────
+logger.info("Evaluating on test set...")
+predictions = trainer.predict(test_dataset=test_dataset)
+df = pd.DataFrame(
+    {
+        "prediction": predictions.predictions.flatten(),
+        "label": predictions.label_ids.flatten(),
+    }
+)
+df.to_csv(os.path.join(output_root, "test_predictions.csv"), index=False)
+wandb.save(os.path.join(output_root, "test_predictions.csv"))
+
+# plot predictions vs labels
+plt.figure(figsize=(10, 6))
+sns.scatterplot(
+    x=predictions.predictions.flatten(),
+    y=predictions.label_ids.flatten(),
+    alpha=0.4,
+    edgecolor=None,
+    s=10,
+)
+plt.xlim([0, 1])
+plt.ylim([0, 1])
+plt.plot(
+    [0, 1], [0, 1], color="red", linestyle="--", linewidth=1, label="Perfect Prediction"
+)
+
+# Labels and title
+plt.xlabel("Predicted MLL binding", fontsize=12, fontweight="bold")
+plt.ylabel("True MLL binding", fontsize=12, fontweight="bold")
+plt.title(
+    f"Predictions vs Labels\nR²: {predictions.metrics['r2']:.4f}\nρ (Pearson): {predictions.metrics['pearson']:.4f}\nρₛ (Spearman): {predictions.metrics['spearman']:.4f}",
+    fontsize=14,
+    fontweight="bold",
+)
+plt.legend()
+plt.tight_layout()
+
+# Save
+plot_path = os.path.join(output_root, "predictions_vs_labels.png")
+plt.savefig(plot_path, dpi=600)
+plt.close()
+
+# log test set metrics to wandb
+logger.info("Logging test set metrics to Weights & Biases...")
+wandb.log(
+    {
+        "test_mse": predictions.metrics["mse"],
+        "test_mae": predictions.metrics["mae"],
+        "test_rmse": predictions.metrics["rmse"],
+        "test_r2": predictions.metrics["r2"],
+        "test_pearson": predictions.metrics["pearson"],
+        "test_spearman": predictions.metrics["spearman"],
+    }
+)
+# add plot to wandb
+wandb.run.summary["predictions_vs_labels_plot"] = wandb.Image(
+    os.path.join(output_root, "predictions_vs_labels.png")
+)
+
+logger.info("Test set evaluation complete.")
 wandb.finish()

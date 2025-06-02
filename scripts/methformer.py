@@ -1,3 +1,4 @@
+import os
 import random
 
 import numpy as np
@@ -6,7 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from torch.utils.data import Dataset
-from transformers import PreTrainedModel
+from transformers import PreTrainedModel, PretrainedConfig
 from transformers.modeling_outputs import ModelOutput, SequenceClassifierOutput
 
 
@@ -225,15 +226,13 @@ class Methformer(PreTrainedModel):
         self.mode = mode
 
     @classmethod
-    def from_pretrained_encoder(
-        cls, pretrained_path, mode="regression", use_cls_token=False
-    ):
-        base_model = cls.from_pretrained(
-            pretrained_path, mode="pretrain", use_cls_token=use_cls_token
-        )
-        new_model = cls(base_model.config, mode=mode, use_cls_token=use_cls_token)
-        new_model.encoder.load_state_dict(base_model.encoder.state_dict())
-        return new_model
+    def from_pretrained_encoder(cls, path, task="pretrain", use_cls_token=False):
+        config = PretrainedConfig.from_pretrained(path)
+        model = cls(config, task=task, use_cls_token=use_cls_token)
+        pretrained = cls(config)
+        pretrained.load_state_dict(torch.load(os.path.join(path, "pytorch_model.bin")), strict=False)
+        model.encoder.load_state_dict(pretrained.encoder.state_dict())
+        return model
 
     def predict(self, dataloader, device="cuda"):
         self.eval()

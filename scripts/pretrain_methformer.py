@@ -69,7 +69,7 @@ logger.info("Model instantiated.")
 training_args = TrainingArguments(
     run_name=run_name,
     output_dir=os.path.join(output_root, "checkpoints"),
-    eval_on_start=False,
+    eval_on_start=True,
     per_device_train_batch_size=128,
     per_device_eval_batch_size=256,
     gradient_accumulation_steps=1,
