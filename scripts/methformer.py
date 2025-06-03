@@ -177,7 +177,10 @@ class Methformer(PreTrainedModel):
         )
 
         self.pretrain_head = nn.Linear(config.hidden_dim, config.input_dim)
-        self.regression_head = nn.Linear(config.hidden_dim, 1)
+        self.regression_head = nn.Sequential(
+            nn.Linear(config.hidden_dim, 1),
+            nn.Sigmoid()  # Outputs in [0, 1]
+        )
 
     def forward(self, input_values, attention_mask, labels=None):
         B, L, _ = input_values.shape

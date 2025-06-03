@@ -74,6 +74,12 @@ After pretraining:
 1. Replace the regression head with a scalar head for MLL prediction.
 2. Use a `Trainer` to fine-tune on log1p-transformed MLL-N RPKM values mean over 1kb regions.
 
+```
+input_values: (N, 32, 2)    # Methylation input per region, 32 bins over a 1kb region (32bp each), 2 channels: 5mC and 5hmC, Values range from 0–1 (methylation fraction), or -1 if missing.
+attention_mask: (N, 32)     # Binary mask that indicates which bins have valid methylation values
+labels: (N,)                # Scalar target per region, MLL-N mean RPKM over 1kb regions
+```
+
 See `scripts/finetune_mll.py` for an example.
 
 ---

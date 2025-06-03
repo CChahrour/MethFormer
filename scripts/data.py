@@ -3,15 +3,15 @@ import os
 
 import anndata as ad
 import crested
+import joblib
 import numpy as np
 import pandas as pd
 import pyranges as pr
 from datasets import Dataset, DatasetDict
+from methformer import MethformerDataset
+from sklearn.preprocessing import MinMaxScaler
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from loguru import logger
-
-from methformer import MethformerDataset
 
 args = argparse.ArgumentParser(description="Prepare Methformer pretraining data")
 args.add_argument(
@@ -46,19 +46,14 @@ args.add_argument(
 )
 args = args.parse_args()
 
-# setup logging
-logger.remove()
-logger.add("logs/data.log", format="{time} {level} {message}", level="INFO")
 
-
-@logger.catch
 def tile_regions(regions_df, tile_size=32):
     """
     Tiles the regions in the DataFrame into fixed-size bins.
     Each region is split into tiles of the specified size, and the resulting
     tiled regions are returned as a new PyRanges object.
     """
-    logger.info(f"Tiling regions into {tile_size}bp bins...")
+    print(f"Tiling regions into {tile_size}bp bins...")
     tiled_rows = []
     for _, row in regions_df.iterrows():
         for i in range(0, 1024, tile_size):
@@ -76,7 +71,6 @@ def tile_regions(regions_df, tile_size=32):
     return pr.PyRanges(pd.DataFrame(tiled_rows))
 
 
-@logger.catch
 def prepare_methylation_tensor(binned_regions, zarr_path, tile_size=32):
     """
     Prepares the methylation tensor from the Zarr dataset and binned regions.
@@ -84,7 +78,7 @@ def prepare_methylation_tensor(binned_regions, zarr_path, tile_size=32):
     and reduces the data by the specified binned regions.
     The resulting DataFrame is saved as a Parquet file.
     """
-    logger.info("Preparing methylation tensor from Zarr dataset...")
+    print("Preparing methylation tensor from Zarr dataset...")
     from modality.contig_dataset import ContigDataset
 
     meth_ds = ContigDataset.from_zarrz(zarr_path)
@@ -117,7 +111,6 @@ def prepare_methylation_tensor(binned_regions, zarr_path, tile_size=32):
     return df
 
 
-@logger.catch
 def build_tensor(df, n_bins=32):
     """
     Builds the methylation tensor from the DataFrame.
@@ -125,7 +118,7 @@ def build_tensor(df, n_bins=32):
     where the last dimension contains the mean fractions of methylated and hydroxymethylated cytosines.
     The function also filters out regions that are fully missing in both methylation types.
     """
-    logger.info("Building methylation tensor from DataFrame...")
+    print("Building methylation tensor from DataFrame...")
     mc_df = df.pivot(
         index=["RegionName", "Bin"], columns="sample_id", values="frac_mc_mean"
     )
@@ -166,14 +159,13 @@ def build_tensor(df, n_bins=32):
     )
 
 
-@logger.catch
 def get_labels(region_file, bigwigs_folder, sample_columns, chromsizes_file):
     """
     Imports bigwig files from the specified folder and regions file,
     and returns a DataFrame with the mean values for each sample.
     The DataFrame is renamed to match the expected sample columns.
     """
-    logger.info("Importing bigwig files and extracting labels...")
+    print("Importing bigwig files and extracting labels...")
     mll_adata = crested.import_bigwigs(
         bigwigs_folder=bigwigs_folder,
         regions_file=region_file,
@@ -197,7 +189,6 @@ def get_labels(region_file, bigwigs_folder, sample_columns, chromsizes_file):
     return mll_df[sample_columns]
 
 
-@logger.catch
 def make_anndata(meth_df, valid_regions_list, mll_df, meth_tensor):
     """
     Creates an AnnData object from the methylation tensor and labels.
@@ -205,7 +196,7 @@ def make_anndata(meth_df, valid_regions_list, mll_df, meth_tensor):
     and the labels in the var field.
     """
 
-    logger.info("Creating AnnData object...")
+    print("Creating AnnData object...")
     obs_meta = pd.read_csv("data/meth_metadata.csv")
     obs_meta = obs_meta[~obs_meta["sample_id"].str.contains("xeno")]
     obs_meta["sample_id"] = "METH-" + obs_meta["sample_id"]
@@ -216,37 +207,38 @@ def make_anndata(meth_df, valid_regions_list, mll_df, meth_tensor):
     region_meta = region_meta.loc[valid_regions_list]
     mll_df_filtered = mll_df.loc[valid_regions_list]
     mll_df_filtered = mll_df_filtered.T
-    logger.info("MLL shape:", mll_df_filtered.shape)
-    logger.info("Region meta shape:", region_meta.shape)
-    logger.info("Obs meta shape:", obs_meta.shape)
-    logger.info("Meth tensor shape:", meth_tensor.shape)
+    print("MLL shape:", mll_df_filtered.shape)
+    print("Region meta shape:", region_meta.shape)
+    print("Obs meta shape:", obs_meta.shape)
+    print("Meth tensor shape:", meth_tensor.shape)
     adata = ad.AnnData(X=mll_df_filtered.values, obs=obs_meta, var=region_meta)
     adata.obsm["methylation"] = meth_tensor
     adata.write("data/methformer_pretrain_MLL.h5ad")
     return adata
 
 
-@logger.catch
 def convert_dataset(adata, mask, mode="pretrain"):
-    logger.info(f"Converting AnnData to MethformerDataset (mode={mode})...")
+    print(f"Converting AnnData to MethformerDataset (mode={mode})...")
     tensor = adata.obsm["methylation"][:, mask.values, :, :]  # (N, R, 2, 32)
-
-    # Reshape to (N, R, C)
-    tensor = tensor.transpose(0, 2, 3, 1).reshape(tensor.shape[0], -1, 2)
-
+    N, R, C, B = tensor.shape  # N = samples, R = regions, C = 2 (channels), B = 32 bins
+    print(f"Tensor shape: {tensor.shape}")
+    input_values = tensor.transpose(0, 1, 3, 2).reshape(N * R, B, C)
+    print(f"Input values shape: {input_values.shape}")
     if mode == "regression":
-        labels = adata.X[:, mask.values].mean(axis=1)  # (N,)
-        return MethformerDataset(tensor, labels=labels, mode="regression")
-    else:
-        return MethformerDataset(tensor, mode="pretrain")
+        # Labels shape: (N, R) → (N * R,)
+        labels = np.asarray(adata.X[:, mask.values]).reshape(-1).astype(np.float32)
+        print(f"Labels shape: {labels.shape}")
+        return MethformerDataset(input_values, labels=labels, mode="regression")
+
+    else:  # pretrain
+        return MethformerDataset(input_values, mode="pretrain")
 
 
-@logger.catch
 def to_numpy(torch_dataset):
     """
     Converts a PyTorch dataset to a NumPy dictionary.
     """
-    logger.info("Converting PyTorch dataset to NumPy arrays...")
+    print("Converting PyTorch dataset to NumPy arrays...")
     loader = DataLoader(torch_dataset, batch_size=1024, num_workers=8)
 
     inputs, labels, masks = [], [], []
@@ -263,7 +255,6 @@ def to_numpy(torch_dataset):
     }
 
 
-@logger.catch
 def main():
     """
     Main function to prepare the pretraining dataset for Methformer.
@@ -272,9 +263,9 @@ def main():
     The AnnData object is then split into training, evaluation, and test sets based on contig,
     and saved as a Hugging Face dataset.
     """
-    logger.info("Starting Methformer pretraining data preparation...")
+    print("Starting Methformer pretraining data preparation...")
     os.makedirs("data", exist_ok=True)
-  
+
     meth_df_file = "data/meth_panel_binned.parquet"
     if os.path.exists(meth_df_file):
         meth_df = pd.read_parquet(meth_df_file)
@@ -293,6 +284,10 @@ def main():
     )
 
     adata = make_anndata(meth_df, valid_regions, mll_df, meth_tensor)
+    adata.X = np.log1p(adata.X.astype(np.float32))
+    scaler = MinMaxScaler()
+    adata.X = scaler.fit_transform(adata.X)
+    joblib.dump(scaler, "data/mll_scaler.pkl")
     adata.write("data/methformer_pretrain_binned.h5ad")
 
     train_mask = ~(adata.var["contig"].isin(["chr8", "chr9"]))
@@ -311,8 +306,8 @@ def main():
         }
     )
 
-    hf_dset.save_to_disk("data/methformer_dataset")
-    logger.info("✅ Pretraining data ready for Methformer!")
+    hf_dset.save_to_disk("data/methformer_dataset_scaled")
+    print("✅ Pretraining data ready for Methformer!")
 
 
 if __name__ == "__main__":

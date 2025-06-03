@@ -1,5 +1,6 @@
 import datetime
 import os
+import pickle
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -35,7 +36,7 @@ logger.info("Starting Methformer fine-tuning...")
 # Run Config
 # ─────────────────────────────────────────────────────────────
 run_name = f"mf_ft_{datetime.datetime.now().strftime('%Y-%m-%d_%H%M')}"
-output_root = "/home/ubuntu/project/MethFormer/output/methformer_finetuned/"
+output_root = "/home/ubuntu/project/MethFormer/output/methformer_finetuned_scaled/"
 os.makedirs(output_root, exist_ok=True)
 
 device = (
@@ -50,10 +51,10 @@ logger.info(f"Using device: {device}")
 # ─────────────────────────────────────────────────────────────
 # Dataset Loading
 # ─────────────────────────────────────────────────────────────
-dataset_path = "/home/ubuntu/project/MethFormer/data/methformer_dataset"
+dataset_path = "/home/ubuntu/project/MethFormer/data/methformer_dataset_scaled"
 logger.info(f"Loading dataset from {dataset_path}")
 dataset = load_from_disk(dataset_path)
-train_dataset = dataset["train"]
+train_dataset = dataset["train"].shuffle(seed=42)
 eval_dataset = dataset["validation"]
 test_dataset = dataset["test"]
 
@@ -82,10 +83,10 @@ training_args = TrainingArguments(
     per_device_eval_batch_size=256,
     gradient_accumulation_steps=1,
     max_grad_norm=1.0,
-    learning_rate=5e-5,
+    learning_rate=1e-6,
     warmup_ratio=0.05,
     lr_scheduler_type="cosine",
-    num_train_epochs=10,
+    num_train_epochs=20,
     logging_dir=os.path.join(output_root, "logs"),
     save_strategy="steps",
     save_total_limit=2,
@@ -184,20 +185,27 @@ logger.info(f"✅ Fine-tuned model saved to {save_path}")
 # ─────────────────────────────────────────────────────────────
 logger.info("Evaluating on test set...")
 predictions = trainer.predict(test_dataset=test_dataset)
-df = pd.DataFrame(
-    {
-        "prediction": predictions.predictions.flatten(),
-        "label": predictions.label_ids.flatten(),
-    }
-)
-df.to_csv(os.path.join(output_root, "test_predictions.csv"), index=False)
-wandb.save(os.path.join(output_root, "test_predictions.csv"))
+# pickle the predictions
+
+with open(os.path.join(output_root, "test_predictions.pkl"), "wb") as f:
+    pickle.dump(predictions, f)
+
+preds = predictions.predictions.flatten()
+labels = predictions.label_ids.flatten()
+
+scaler_path = "/home/ubuntu/project/MethFormer/data/mll_scaler.pkl"
+# Load the scaler
+with open(scaler_path, "rb") as f:
+    scaler = pickle.load(f)
+# Inverse transform the predictions and labels
+preds = scaler.inverse_transform(preds.reshape(-1, 1)).flatten()
+labels = scaler.inverse_transform(labels.reshape(-1, 1)).flatten()
 
 # plot predictions vs labels
 plt.figure(figsize=(10, 6))
 sns.scatterplot(
-    x=predictions.predictions.flatten(),
-    y=predictions.label_ids.flatten(),
+    x=preds,
+    y=labels,
     alpha=0.4,
     edgecolor=None,
     s=10,
@@ -212,7 +220,7 @@ plt.plot(
 plt.xlabel("Predicted MLL binding", fontsize=12, fontweight="bold")
 plt.ylabel("True MLL binding", fontsize=12, fontweight="bold")
 plt.title(
-    f"Predictions vs Labels\nR²: {predictions.metrics['r2']:.4f}\nρ (Pearson): {predictions.metrics['pearson']:.4f}\nρₛ (Spearman): {predictions.metrics['spearman']:.4f}",
+    "Predictions vs Labels",
     fontsize=14,
     fontweight="bold",
 )
@@ -226,17 +234,6 @@ plt.close()
 
 # log test set metrics to wandb
 logger.info("Logging test set metrics to Weights & Biases...")
-wandb.log(
-    {
-        "test_mse": predictions.metrics["mse"],
-        "test_mae": predictions.metrics["mae"],
-        "test_rmse": predictions.metrics["rmse"],
-        "test_r2": predictions.metrics["r2"],
-        "test_pearson": predictions.metrics["pearson"],
-        "test_spearman": predictions.metrics["spearman"],
-    }
-)
-# add plot to wandb
 wandb.run.summary["predictions_vs_labels_plot"] = wandb.Image(
     os.path.join(output_root, "predictions_vs_labels.png")
 )
