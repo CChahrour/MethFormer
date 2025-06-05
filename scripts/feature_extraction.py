@@ -39,9 +39,11 @@ model.eval().to(device)
 # ─────────────────────────────────────────────────────────────
 dataset = load_from_disk(data_dir)["test"]
 
+
 def binarize_labels(example):
     example["labels"] = int(example["labels"] > 0.5)
     return example
+
 
 dataset = dataset.map(binarize_labels)
 
@@ -52,6 +54,7 @@ data_collator = MethformerCollator(mode="binary_classification")
 dataloader = DataLoader(
     dataset, batch_size=batch_size, shuffle=False, collate_fn=data_collator
 )
+
 
 # ─────────────────────────────────────────────────────────────
 # Attribution Setup
@@ -80,7 +83,7 @@ for batch in dataloader:
     attributions, delta = ig.attribute(
         inputs=input_values,
         additional_forward_args=(attention_mask,),
-        target=target_label,
+        target=0,
         return_convergence_delta=True,
     )
 
@@ -91,7 +94,6 @@ for batch in dataloader:
         preds = model(input_values=input_values, attention_mask=attention_mask).logits
         all_preds.append(torch.sigmoid(preds).cpu().numpy())
     all_labels.append(labels.cpu().numpy())
-
 
 
 # ─────────────────────────────────────────────────────────────
@@ -119,22 +121,24 @@ tp_attributions = attributions[mask][:n_plot]
 
 
 for i in range(n_plot):
-    fig, axes = plt.subplots(tp_inputs.shape[2], 1, figsize=(12, 2.5 * tp_inputs.shape[2]), sharex=True)
+    fig, axes = plt.subplots(
+        tp_inputs.shape[2], 1, figsize=(12, 2.5 * tp_inputs.shape[2]), sharex=True
+    )
 
     for ch in range(tp_inputs.shape[2]):
         ax = axes[ch]
-        ax.plot(tp_inputs[i, :, ch], label=f"Input Channel {ch}", color='black')
-        ax.plot(tp_attributions[i, :, ch], label="Attribution", color='red', alpha=0.7)
+        ax.plot(tp_inputs[i, :, ch], label=f"Input Channel {ch}", color="black")
+        ax.plot(tp_attributions[i, :, ch], label="Attribution", color="red", alpha=0.7)
         ax.set_ylabel("Signal / Attribution")
         ax.legend(loc="upper right")
     top_bins = np.argsort(tp_attributions[i, :, ch])[-3:]
     for b in top_bins:
-        ax.axvline(b, color='blue', linestyle='--', alpha=0.3)
+        ax.axvline(b, color="blue", linestyle="--", alpha=0.3)
 
-    plt.suptitle(f"True Positive Bound Example {i+1}", fontsize=16, fontweight='bold')
+    plt.suptitle(f"True Positive Bound Example {i + 1}", fontsize=16, fontweight="bold")
     plt.xlabel("Genomic Bins")
     plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, f"tp_bound_example_{i+1}.png"), dpi=300)
+    plt.savefig(os.path.join(output_dir, f"tp_bound_example_{i + 1}.png"), dpi=300)
 
 
 # ─────────────────────────────────────────────────────────────
