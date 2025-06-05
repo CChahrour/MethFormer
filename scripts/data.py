@@ -229,6 +229,11 @@ def convert_dataset(adata, mask, mode="pretrain"):
         labels = np.asarray(adata.X[:, mask.values]).reshape(-1).astype(np.float32)
         print(f"Labels shape: {labels.shape}")
         return MethformerDataset(input_values, labels=labels, mode="regression")
+    elif mode == "binary_classification":
+        # Labels shape: (N, R) → (N * R,)
+        labels = np.asarray(adata.X[:, mask.values]).reshape(-1).astype(np.float32)
+        labels = (labels > 0.5).astype(np.float32)
+        print(f"Labels shape: {labels.shape}")
 
     else:  # pretrain
         return MethformerDataset(input_values, mode="pretrain")

@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from safetensors.torch import load_file
+from torch.nn import BCEWithLogitsLoss
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from torch.utils.data import Dataset
 from transformers import PretrainedConfig, PreTrainedModel
@@ -32,20 +33,22 @@ class MethformerDataset(Dataset):
         inputs:
             - pretrain mode: Tensor (N, R, C)
             - regression mode: Tensor (N, L, C)
+            - binary classification mode: Tensor (N, L, C)
         labels:
             - pretrain mode: None
             - regression mode: Tensor (N,)
+            - binary classification mode: Tensor (N,)
         """
-        assert mode in {"pretrain", "regression"}
         self.mode = mode
         self.mask_value = mask_value
         self.masking_ratio = masking_ratio
 
+        raise ValueError(f"Unsupported mode '{mode}'. Must be ...")
         if mode == "pretrain":
             self.data = inputs
             self.n_samples, self.n_regions, self.n_channels = self.data.shape
             self.chunk_size = min(chunk_size, self.n_regions)
-        else:  # regression
+        else: # regression or binary_classification
             assert labels is not None
             assert inputs.shape[0] == labels.shape[0]
             self.inputs = torch.tensor(inputs, dtype=torch.float32)
@@ -142,15 +145,13 @@ class Methformer(PreTrainedModel):
     def __init__(self, config, mode="pretrain", use_cls_token=False):
         super().__init__(config)
         self.config = config
-        if mode not in {"pretrain", "regression"}:
-            raise ValueError(
-                f"Unsupported mode '{self.mode}'. Must be 'pretrain' or 'regression'."
-            )
-
         self.mode = mode
         self.use_cls_token = use_cls_token
-
         self.input_proj = nn.Linear(config.input_dim, config.hidden_dim)
+        if mode not in {"pretrain", "regression", "binary_classification"}:
+            raise ValueError(
+                f"Unsupported mode '{self.mode}'. Must be 'pretrain', 'regression', or 'binary_classification'."
+            )
         print("input_proj shape:", self.input_proj.weight.shape)
         print("input_proj bias shape:", self.input_proj.bias.shape)
         print("input_dim:", config.input_dim)
@@ -180,6 +181,9 @@ class Methformer(PreTrainedModel):
         self.regression_head = nn.Sequential(
             nn.Linear(config.hidden_dim, 1),
             nn.Sigmoid()  # Outputs in [0, 1]
+        )
+        self.binary_classification_head = nn.Sequential(
+            nn.Linear(config.hidden_dim, 1)
         )
 
     def forward(self, input_values, attention_mask, labels=None):
@@ -227,11 +231,17 @@ class Methformer(PreTrainedModel):
             loss = F.mse_loss(logits, labels) if labels is not None else None
             return SequenceClassifierOutput(loss=loss, logits=logits)
 
+        elif self.mode == "binary_classification":
+            pooled = x[:, 0] if self.use_cls_token else (x * attention_mask.unsqueeze(-1)).sum(1) / attention_mask.sum(1, keepdim=True).clamp(min=1)
+            logits = self.binary_classification_head(pooled).squeeze(-1)
+            loss = BCEWithLogitsLoss()(logits, labels.float()) if labels is not None else None
+            return SequenceClassifierOutput(loss=loss, logits=logits)
+
         else:
             raise ValueError(f"Unsupported mode: {self.mode}")
 
     def set_mode(self, mode: str):
-        assert mode in {"pretrain", "regression"}, f"Invalid mode: {mode}"
+        assert mode in {"pretrain", "regression", "binary_classification"}, f"Invalid mode: {mode}"
         self.mode = mode
 
     @classmethod
