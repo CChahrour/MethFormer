@@ -57,8 +57,8 @@ dataloader = DataLoader(
 # Attribution Setup
 # ─────────────────────────────────────────────────────────────
 def forward_fn(input_values, attention_mask):
-    outputs = model(input_values=input_values, attention_mask=attention_mask)
-    return torch.sigmoid(outputs.logits)
+    out = model(input_values=input_values, attention_mask=attention_mask)
+    return torch.sigmoid(out.logits).unsqueeze(1)
 
 
 ig = IntegratedGradients(forward_fn)
