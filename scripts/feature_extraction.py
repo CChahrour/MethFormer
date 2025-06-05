@@ -7,12 +7,14 @@ from captum.attr import IntegratedGradients
 from datasets import load_from_disk
 from methformer import Methformer, MethformerCollator
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 # ─────────────────────────────────────────────────────────────
 # Config
 # ─────────────────────────────────────────────────────────────
+THRESHOLD = 0.0
 model_root = (
-    "/home/ubuntu/project/MethFormer/output/methformer_finetuned_bincls_focal_05"
+    "output/methformer_finetuned_bincls_focal_00"
 )
 data_dir = "/home/ubuntu/project/MethFormer/data/methformer_dataset_scaled"
 
@@ -41,7 +43,7 @@ dataset = load_from_disk(data_dir)["test"]
 
 
 def binarize_labels(example):
-    example["labels"] = int(example["labels"] > 0.5)
+    example["labels"] = int(example["labels"] > THRESHOLD)
     return example
 
 
@@ -74,12 +76,16 @@ all_labels = []
 # ─────────────────────────────────────────────────────────────
 # Attribution Loop
 # ─────────────────────────────────────────────────────────────
-for batch in dataloader:
+for batch in tqdm(dataloader, desc="Computing attributions"):
     input_values = batch["input_values"].to(device).requires_grad_()
     attention_mask = batch["attention_mask"].to(device)
     labels = batch["labels"].to(device)
 
-    # Compute attributions
+    if attention_mask.sum(dim=1).min() == 0:
+        print("⚠️ Skipping batch with fully masked input.")
+        continue
+
+    # Attribution
     attributions, delta = ig.attribute(
         inputs=input_values,
         additional_forward_args=(attention_mask,),
