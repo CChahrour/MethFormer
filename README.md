@@ -1,6 +1,6 @@
 # 🧚 MethFormer: A Transformer for DNA Methylation
 
-**MethFormer** is a masked regression transformer model trained to learn local and long-range patterns in DNA methylation (5mC and 5hmC) across genomic regions. Pretrained on binned methylation data, it is designed for downstream fine-tuning on tasks such as predicting MLL binding or chromatin state.
+**MethFormer**  is a Vision Transformer (ViT)-inspired model for DNA methylation modeling. It uses a masked regression objective to learn both local and long-range patterns in 5mC and 5hmC methylation across genomic regions. Pretrained on binned methylation data, MethFormer is designed for downstream fine-tuning on tasks such as predicting MLL binding or chromatin state.
 
 ---
 
